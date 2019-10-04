@@ -41,3 +41,10 @@ include $(TOP_PATH)/uniden/Android.mk
 include $(TOP_PATH)/winradio/Android.mk
 include $(TOP_PATH)/wj/Android.mk
 include $(TOP_PATH)/yaesu/Android.mk
+include $(TOP_PATH)/icmarine/Android.mk
+include $(TOP_PATH)/dorji/Android.mk
+include $(TOP_PATH)/barrett/Android.mk
+include $(TOP_PATH)/elad/Android.mk
+include $(TOP_PATH)/cnctrk/Android.mk
+include $(TOP_PATH)/prosistel/Android.mk
+include $(TOP_PATH)/ioptron/Android.mk	

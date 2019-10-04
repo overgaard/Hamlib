@@ -7,6 +7,6 @@ LOCAL_MODULE := elecraft
 
 LOCAL_CFLAGS := -DHAVE_CONFIG_H
 LOCAL_C_INCLUDES := android include src
-LOCAL_LDLIBS := -lhamlib
+#LOCAL_LDLIBS := -lhamlib
 
 include $(BUILD_STATIC_LIBRARY)
