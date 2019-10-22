@@ -25,9 +25,8 @@ LOCAL_SRC_FILES := \
         debug.c \
         network.c \
         cm108.c \
-		gpio.c \
-		microham.c
-
+	gpio.c \
+	microham.c
 
 LOCAL_MODULE := libhamlib
 LOCAL_CFLAGS := -DHAVE_CONFIG_H
@@ -37,8 +36,8 @@ LOCAL_STATIC_LIBRARIES := adat alinco amsat aor ars celestron \
         gs232a heathkit icom jrc kachina kenwood kit \
         lowe m2 pcr prm80 racal rft \
         rotorez rs sartek skanti spid tapr tentec ts7400 tuner \
-        uniden winradio wj yaesu icmarine dorji meade barrett elad cnctrk \
-		prosistel rot_ioptron
+        uniden winradio wj yaesu icmarine dorji barrett elad cnctrk \
+	prosistel meade rot_ioptron
 
 LOCAL_LDLIBS := -llog
 

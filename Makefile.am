@@ -30,3 +30,6 @@ DIST_SUBDIRS = macros include lib src c++ bindings tests doc android scripts\
 
 # Install any third party macros into our tree for distribution
 ACLOCAL_AMFLAGS = -I macros --install
+
+CFLAGS += -Ilibusb/libusb
+LDFLAGS += -Llibus

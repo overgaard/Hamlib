@@ -16,7 +16,6 @@
  *
  *   You should have received a copy of the GNU Lesser General Public
  *   License along with this library; if not, write to the Free Software
- *   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -307,6 +306,202 @@ const char * HAMLIB_API rigerror(int errnum)
  *
  * \sa rig_cleanup(), rig_open()
  */
+RIG * HAMLIB_API rig_init2(rig_model_t rig_model, int android_usb_fd)
+{
+    RIG *rig;
+    const struct rig_caps *caps;
+    struct rig_state *rs;
+    int i, retcode;
+
+    rig_debug(RIG_DEBUG_VERBOSE, "%s called\n", __func__);
+
+    rig_check_backend(rig_model);
+
+    caps = rig_get_caps(rig_model);
+
+    if (!caps)
+    {
+        return NULL;
+    }
+
+    /*
+     * okay, we've found it. Allocate some memory and set it to zeros,
+     * and especially  the callbacks
+     */
+    rig = calloc(1, sizeof(RIG));
+
+    if (rig == NULL)
+    {
+        /*
+         * FIXME: how can the caller know it's a memory shortage,
+         *        and not "rig not found" ?
+         */
+        return NULL;
+    }
+
+    /* caps is const, so we need to tell compiler
+       that we know what we are doing */
+    rig->caps = (struct rig_caps *) caps;
+
+    /*
+     * populate the rig->state
+     * TODO: read the Preferences here!
+     */
+    rs = &rig->state;
+
+    rs->rigport.fd = android_usb_fd;		
+    rs->pttport.fd = android_usb_fd;
+    rs->comm_state = 0;
+    rs->rigport.type.rig = caps->port_type; /* default from caps */
+    rig_debug(RIG_DEBUG_VERBOSE, "ANDROID(in %s): stored provided fd (%d) in rig_state->rigport.rd (and pttport.fd)\n", 
+        __func__, rs->rigport.fd);
+
+    switch (caps->port_type)
+    {
+    case RIG_PORT_SERIAL:
+        strncpy(rs->rigport.pathname, DEFAULT_SERIAL_PORT, FILPATHLEN - 1); 
+        rs->rigport.parm.serial.rate = caps->serial_rate_max;   /* fastest ! */
+        rs->rigport.parm.serial.data_bits = caps->serial_data_bits;
+        rs->rigport.parm.serial.stop_bits = caps->serial_stop_bits;
+        rs->rigport.parm.serial.parity = caps->serial_parity;
+        rs->rigport.parm.serial.handshake = caps->serial_handshake;
+        break;
+
+    case RIG_PORT_PARALLEL:
+        strncpy(rs->rigport.pathname, DEFAULT_PARALLEL_PORT, FILPATHLEN - 1);
+        break;
+
+    /* Adding support for CM108 GPIO.  This is compatible with CM108 series
+     * USB audio chips from CMedia and SSS1623 series USB audio chips from 3S
+     */
+    case RIG_PORT_CM108:
+        strncpy(rs->rigport.pathname, DEFAULT_CM108_PORT, FILPATHLEN);
+        rs->rigport.parm.cm108.ptt_bitnum = DEFAULT_CM108_PTT_BITNUM;
+        rs->pttport.parm.cm108.ptt_bitnum = DEFAULT_CM108_PTT_BITNUM;
+        break;
+
+    case RIG_PORT_GPIO:
+        strncpy(rs->rigport.pathname, DEFAULT_GPIO_PORT, FILPATHLEN);
+        break;
+
+    case RIG_PORT_NETWORK:
+    case RIG_PORT_UDP_NETWORK:
+        strncpy(rs->rigport.pathname, "127.0.0.1:4532", FILPATHLEN - 1);
+        break;
+
+    default:
+        strncpy(rs->rigport.pathname, "", FILPATHLEN - 1);
+    }
+
+    rs->rigport.write_delay = caps->write_delay;
+    rs->rigport.post_write_delay = caps->post_write_delay;
+    rs->rigport.timeout = caps->timeout;
+    rs->rigport.retry = caps->retry;
+    rs->pttport.type.ptt = caps->ptt_type;
+    rs->dcdport.type.dcd = caps->dcd_type;
+
+    rs->vfo_comp = 0.0; /* override it with preferences */
+    rs->current_vfo = RIG_VFO_CURR; /* we don't know yet! */
+    rs->tx_vfo = RIG_VFO_CURR;  /* we don't know yet! */
+    rs->transceive = RIG_TRN_OFF;
+    rs->poll_interval = 500;
+    /* should it be a parameter to rig_init ? --SF */
+    rs->itu_region = RIG_ITU_REGION2;
+    rs->lo_freq = 0;
+
+    switch (rs->itu_region)
+    {
+    case RIG_ITU_REGION1:
+        memcpy(rs->tx_range_list, caps->tx_range_list1,
+               sizeof(struct freq_range_list)*FRQRANGESIZ);
+        memcpy(rs->rx_range_list, caps->rx_range_list1,
+               sizeof(struct freq_range_list)*FRQRANGESIZ);
+        break;
+
+    case RIG_ITU_REGION2:
+    case RIG_ITU_REGION3:
+    default:
+        memcpy(rs->tx_range_list, caps->tx_range_list2,
+               sizeof(struct freq_range_list)*FRQRANGESIZ);
+        memcpy(rs->rx_range_list, caps->rx_range_list2,
+               sizeof(struct freq_range_list)*FRQRANGESIZ);
+        break;
+    }
+
+    rs->vfo_list = 0;
+    rs->mode_list = 0;
+
+    for (i = 0; i < FRQRANGESIZ && !RIG_IS_FRNG_END(rs->rx_range_list[i]); i++)
+    {
+        rs->vfo_list |= rs->rx_range_list[i].vfo;
+        rs->mode_list |= rs->rx_range_list[i].modes;
+    }
+
+    for (i = 0; i < FRQRANGESIZ && !RIG_IS_FRNG_END(rs->tx_range_list[i]); i++)
+    {
+        rs->vfo_list |= rs->tx_range_list[i].vfo;
+        rs->mode_list |= rs->tx_range_list[i].modes;
+    }
+
+    memcpy(rs->preamp, caps->preamp, sizeof(int)*MAXDBLSTSIZ);
+    memcpy(rs->attenuator, caps->attenuator, sizeof(int)*MAXDBLSTSIZ);
+    memcpy(rs->tuning_steps, caps->tuning_steps,
+           sizeof(struct tuning_step_list)*TSLSTSIZ);
+    memcpy(rs->filters, caps->filters,
+           sizeof(struct filter_list)*FLTLSTSIZ);
+    memcpy(&rs->str_cal, &caps->str_cal,
+           sizeof(cal_table_t));
+
+    memcpy(rs->chan_list, caps->chan_list, sizeof(chan_t)*CHANLSTSIZ);
+
+    rs->has_get_func = caps->has_get_func;
+    rs->has_set_func = caps->has_set_func;
+    rs->has_get_level = caps->has_get_level;
+    rs->has_set_level = caps->has_set_level;
+    rs->has_get_parm = caps->has_get_parm;
+    rs->has_set_parm = caps->has_set_parm;
+
+    /* emulation by frontend */
+    if ((caps->has_get_level & RIG_LEVEL_STRENGTH) == 0
+            && (caps->has_get_level & RIG_LEVEL_RAWSTR) == RIG_LEVEL_RAWSTR)
+    {
+        rs->has_get_level |= RIG_LEVEL_STRENGTH;
+    }
+
+    memcpy(rs->level_gran, caps->level_gran, sizeof(gran_t)*RIG_SETTING_MAX);
+    memcpy(rs->parm_gran, caps->parm_gran, sizeof(gran_t)*RIG_SETTING_MAX);
+
+    rs->max_rit = caps->max_rit;
+    rs->max_xit = caps->max_xit;
+    rs->max_ifshift = caps->max_ifshift;
+    rs->announces = caps->announces;
+
+    // The following line need to be fixed. How to know if Android-mode is true?
+    //rs->rigport.fd = rs->pttport.fd = rs->dcdport.fd = -1;
+
+    /*
+     * let the backend a chance to setup his private data
+     * This must be done only once defaults are setup,
+     * so the backend init can override rig_state.
+     */
+    if (caps->rig_init != NULL)
+    {
+        retcode = caps->rig_init(rig);
+
+        if (retcode != RIG_OK)
+        {
+            rig_debug(RIG_DEBUG_VERBOSE,
+                      "%s: backend_init failed!\n",
+                      __func__);
+            /* cleanup and exit */
+            free(rig);
+            return NULL;
+        }
+    }
+
+    return rig;
+}
+
 RIG * HAMLIB_API rig_init(rig_model_t rig_model)
 {
     RIG *rig;
@@ -351,7 +546,6 @@ RIG * HAMLIB_API rig_init(rig_model_t rig_model)
     rs = &rig->state;
 
     rs->rigport.fd = -1;
-    rs->pttport.fd = -1;
     rs->pttport.fd = -1;
     rs->comm_state = 0;
     rs->rigport.type.rig = caps->port_type; /* default from caps */
@@ -518,14 +712,13 @@ RIG * HAMLIB_API rig_init(rig_model_t rig_model)
  *
  * \sa rig_init(), rig_close()
  */
-int HAMLIB_API rig_open(RIG *rig)
+int HAMLIB_API rig_open2(RIG *rig)
 {
     const struct rig_caps *caps;
     struct rig_state *rs;
     int status = RIG_OK;
 
     rig_debug(RIG_DEBUG_VERBOSE, "%s called\n", __func__);
-
     if (!rig || !rig->caps)
     {
         return -RIG_EINVAL;
@@ -534,12 +727,13 @@ int HAMLIB_API rig_open(RIG *rig)
     caps = rig->caps;
     rs = &rig->state;
 
+    rig_debug(RIG_DEBUG_VERBOSE, "ANDROID(in %s): rig_pathname: [%s] fd: %d\n", __func__,
+        rs->rigport.pathname, rs->rigport.fd);
+
     if (rs->comm_state)
     {
         return -RIG_EINVAL;
     }
-
-    rs->rigport.fd = -1;
 
     if (rs->rigport.type.rig == RIG_PORT_SERIAL)
     {
@@ -870,6 +1064,355 @@ int HAMLIB_API rig_open(RIG *rig)
     return RIG_OK;
 }
 
+int HAMLIB_API rig_open(RIG *rig)
+{
+    const struct rig_caps *caps;
+    struct rig_state *rs;
+    int status = RIG_OK;
+
+    rig_debug(RIG_DEBUG_VERBOSE, "%s called\n", __func__);
+
+    if (!rig || !rig->caps)
+    {
+        return -RIG_EINVAL;
+    }
+
+    caps = rig->caps;
+    rs = &rig->state;
+
+    if (rs->comm_state)
+    {
+        return -RIG_EINVAL;
+    }
+
+    if (rs->rigport.type.rig == RIG_PORT_SERIAL)
+    {
+        if (rs->rigport.parm.serial.rts_state != RIG_SIGNAL_UNSET
+            && rs->rigport.parm.serial.handshake == RIG_HANDSHAKE_HARDWARE)
+        {
+            rig_debug(RIG_DEBUG_ERR,
+                      "%s: cannot set RTS with hardware handshake \"%s\"\n",
+                      __func__,
+                      rs->rigport.pathname);
+            return -RIG_ECONF;
+        }
+
+        if ('\0' == rs->pttport.pathname[0]
+            || !strcmp(rs->pttport.pathname, rs->rigport.pathname))
+        {
+            /* check for control line conflicts */
+            if (rs->rigport.parm.serial.rts_state != RIG_SIGNAL_UNSET
+                && rs->pttport.type.ptt == RIG_PTT_SERIAL_RTS)
+            {
+                rig_debug(RIG_DEBUG_ERR,
+                          "%s: cannot set RTS with PTT by RTS \"%s\"\n",
+                          __func__,
+                          rs->rigport.pathname);
+                return -RIG_ECONF;
+            }
+
+            if (rs->rigport.parm.serial.dtr_state != RIG_SIGNAL_UNSET
+                && rs->pttport.type.ptt == RIG_PTT_SERIAL_DTR)
+            {
+                rig_debug(RIG_DEBUG_ERR,
+                          "%s: cannot set DTR with PTT by DTR \"%s\"\n",
+                          __func__,
+                          rs->rigport.pathname);
+                return -RIG_ECONF;
+            }
+        }
+    }
+
+    status = port_open(&rs->rigport);
+
+    if (status < 0)
+    {
+        return status;
+    }
+
+    switch (rs->pttport.type.ptt)
+    {
+    case RIG_PTT_NONE:
+    case RIG_PTT_RIG:
+    case RIG_PTT_RIG_MICDATA:
+        break;
+
+    case RIG_PTT_SERIAL_RTS:
+    case RIG_PTT_SERIAL_DTR:
+        if (rs->pttport.pathname[0] == '\0'
+            && rs->rigport.type.rig == RIG_PORT_SERIAL)
+        {
+            strcpy(rs->pttport.pathname, rs->rigport.pathname);
+        }
+
+        if (!strcmp(rs->pttport.pathname, rs->rigport.pathname))
+        {
+            rs->pttport.fd = rs->rigport.fd;
+
+            /* Needed on Linux because the serial port driver sets RTS/DTR
+               on open - only need to address the PTT line as we offer
+               config parameters to control the other (dtr_state &
+               rts_state) */
+            if (rs->pttport.type.ptt == RIG_PTT_SERIAL_DTR)
+            {
+                status = ser_set_dtr(&rs->pttport, 0);
+            }
+
+            if (rs->pttport.type.ptt == RIG_PTT_SERIAL_RTS)
+            {
+                status = ser_set_rts(&rs->pttport, 0);
+            }
+        }
+        else
+        {
+            rs->pttport.fd = ser_open(&rs->pttport);
+
+            if (rs->pttport.fd < 0)
+            {
+                rig_debug(RIG_DEBUG_ERR,
+                          "%s: cannot open PTT device \"%s\"\n",
+                          __func__,
+                          rs->pttport.pathname);
+                status = -RIG_EIO;
+            }
+
+            if (RIG_OK == status
+                && (rs->pttport.type.ptt == RIG_PTT_SERIAL_DTR
+                    || rs->pttport.type.ptt == RIG_PTT_SERIAL_RTS))
+            {
+                /* Needed on Linux because the serial port driver sets
+                   RTS/DTR high on open - set both low since we offer no
+                   control of the non-PTT line and low is better than
+                   high */
+                status = ser_set_dtr(&rs->pttport, 0);
+
+                if (RIG_OK == status)
+                {
+                    status = ser_set_rts(&rs->pttport, 0);
+                }
+            }
+
+            ser_close(&rs->pttport);
+        }
+
+        break;
+
+    case RIG_PTT_PARALLEL:
+        rs->pttport.fd = par_open(&rs->pttport);
+
+        if (rs->pttport.fd < 0)
+        {
+            rig_debug(RIG_DEBUG_ERR,
+                      "%s: cannot open PTT device \"%s\"\n",
+                      __func__,
+                      rs->pttport.pathname);
+            status = -RIG_EIO;
+        }
+        else
+        {
+            par_ptt_set(&rs->pttport, RIG_PTT_OFF);
+        }
+
+        break;
+
+    case RIG_PTT_CM108:
+        rs->pttport.fd = cm108_open(&rs->pttport);
+
+        if (rs->pttport.fd < 0)
+        {
+            rig_debug(RIG_DEBUG_ERR,
+                      "%s: cannot open PTT device \"%s\"\n",
+                      __func__,
+                      rs->pttport.pathname);
+            status = -RIG_EIO;
+        }
+        else
+        {
+            cm108_ptt_set(&rs->pttport, RIG_PTT_OFF);
+        }
+
+        break;
+
+    case RIG_PTT_GPIO:
+        rs->pttport.fd = gpio_open(&rs->pttport, 1, 1);
+
+        if (rs->pttport.fd < 0)
+        {
+            rig_debug(RIG_DEBUG_ERR,
+                      "%s: cannot open PTT device \"%s\"\n",
+                      __func__,
+                      rs->pttport.pathname);
+            status = -RIG_EIO;
+        }
+        else
+        {
+            gpio_ptt_set(&rs->pttport, RIG_PTT_OFF);
+        }
+
+        break;
+
+    case RIG_PTT_GPION:
+        rs->pttport.fd = gpio_open(&rs->pttport, 1, 0);
+
+        if (rs->pttport.fd < 0)
+        {
+            rig_debug(RIG_DEBUG_ERR,
+                      "%s: cannot open PTT device \"%s\"\n",
+                      __func__,
+                      rs->pttport.pathname);
+            status = -RIG_EIO;
+        }
+        else
+        {
+            gpio_ptt_set(&rs->pttport, RIG_PTT_OFF);
+        }
+
+        break;
+
+    default:
+        rig_debug(RIG_DEBUG_ERR,
+                  "%s: unsupported PTT type %d\n",
+                  __func__,
+                  rs->pttport.type.ptt);
+        status = -RIG_ECONF;
+    }
+
+    switch (rs->dcdport.type.dcd)
+    {
+    case RIG_DCD_NONE:
+    case RIG_DCD_RIG:
+        break;
+
+    case RIG_DCD_SERIAL_DSR:
+    case RIG_DCD_SERIAL_CTS:
+    case RIG_DCD_SERIAL_CAR:
+        if (rs->dcdport.pathname[0] == '\0'
+            && rs->rigport.type.rig == RIG_PORT_SERIAL)
+        {
+            strcpy(rs->dcdport.pathname, rs->rigport.pathname);
+        }
+
+        if (strcmp(rs->dcdport.pathname, rs->rigport.pathname) == 0)
+        {
+             rs->dcdport.fd = rs->rigport.fd;
+        }
+        else
+        {
+            rs->dcdport.fd = ser_open(&rs->dcdport);
+        }
+
+        if (rs->dcdport.fd < 0)
+        {
+            rig_debug(RIG_DEBUG_ERR,
+                      "%s: cannot open DCD device \"%s\"\n",
+                      __func__,
+                      rs->dcdport.pathname);
+            status = -RIG_EIO;
+        }
+
+        break;
+
+    case RIG_DCD_PARALLEL:
+        rs->dcdport.fd = par_open(&rs->dcdport);
+
+        if (rs->dcdport.fd < 0)
+        {
+            rig_debug(RIG_DEBUG_ERR,
+                      "%s: cannot open DCD device \"%s\"\n",
+                      __func__,
+                      rs->dcdport.pathname);
+            status = -RIG_EIO;
+        }
+
+        break;
+
+    case RIG_DCD_GPIO:
+        rs->dcdport.fd = gpio_open(&rs->dcdport, 0, 1);
+
+        if (rs->dcdport.fd < 0)
+        {
+            rig_debug(RIG_DEBUG_ERR,
+                      "%s: cannot open DCD device \"%s\"\n",
+                      __func__,
+                      rs->dcdport.pathname);
+            status = -RIG_EIO;
+        }
+
+        break;
+
+    case RIG_DCD_GPION:
+        rs->dcdport.fd = gpio_open(&rs->dcdport, 0, 0);
+
+        if (rs->dcdport.fd < 0)
+        {
+            rig_debug(RIG_DEBUG_ERR,
+                      "%s: cannot open DCD device \"%s\"\n",
+                      __func__,
+                      rs->dcdport.pathname);
+            status = -RIG_EIO;
+        }
+
+        break;
+
+    default:
+        rig_debug(RIG_DEBUG_ERR,
+                  "%s: unsupported DCD type %d\n",
+                  __func__,
+                  rs->dcdport.type.dcd);
+        status = -RIG_ECONF;
+    }
+
+    if (status < 0)
+    {
+        port_close(&rs->rigport, rs->rigport.type.rig);
+        return status;
+    }
+
+    add_opened_rig(rig);
+
+    rs->comm_state = 1;
+
+    /*
+     * Maybe the backend has something to initialize
+     * In case of failure, just close down and report error code.
+     */
+    if (caps->rig_open != NULL)
+    {
+        status = caps->rig_open(rig);
+
+        if (status != RIG_OK)
+        {
+            return status;
+        }
+    }
+
+    /*
+     * trigger state->current_vfo first retrieval
+     */
+    if (rig_get_vfo(rig, &rs->current_vfo) == RIG_OK)
+    {
+        rs->tx_vfo = rs->current_vfo;
+    }
+
+#if 0
+
+    /*
+     * Check the current tranceive state of the rig
+     */
+    if (rs->transceive == RIG_TRN_RIG)
+    {
+        int retval, trn;
+        retval = rig_get_trn(rig, &trn);
+
+        if (retval == RIG_OK && trn == RIG_TRN_RIG)
+        {
+            add_trn_rig(rig);
+        }
+    }
+
+#endif
+    return RIG_OK;
+}
 
 /**
  * \brief close the communication to the rig

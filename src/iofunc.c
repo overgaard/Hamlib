@@ -53,6 +53,7 @@
 #include "usb_port.h"
 #include "network.h"
 #include "cm108.h"
+#include "android_usb.h"
 
 /**
  * \brief Open a hamlib_port based on its rig port type
@@ -64,9 +65,11 @@ int HAMLIB_API port_open(hamlib_port_t *p)
     int status;
     int want_state_delay = 0;
 
-    rig_debug(RIG_DEBUG_VERBOSE, "%s called\n", __func__);
-
-    p->fd = -1;
+    if (!(strncmp(p->pathname, "ANDROID-USB", 11))) {
+        rig_debug(RIG_DEBUG_VERBOSE, "ANDROID(in %s): not setting rigport->fd to -1\n", __func__);
+    } else {
+        p->fd = -1;
+    }
 
     switch (p->type.rig)
     {

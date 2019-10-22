@@ -47,4 +47,4 @@ include $(TOP_PATH)/barrett/Android.mk
 include $(TOP_PATH)/elad/Android.mk
 include $(TOP_PATH)/cnctrk/Android.mk
 include $(TOP_PATH)/prosistel/Android.mk
-include $(TOP_PATH)/ioptron/Android.mk	
+include $(TOP_PATH)/ioptron/Android.mk

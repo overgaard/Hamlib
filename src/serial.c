@@ -84,6 +84,7 @@
 #endif
 
 #include "microham.h"
+#include "android_usb.h"
 
 static int uh_ptt_fd   = -1;
 static int uh_radio_fd = -1;
@@ -182,6 +183,34 @@ int HAMLIB_API serial_open(hamlib_port_t *rp)
         uh_radio_fd=fd;
         return RIG_OK;
     }
+
+    /*
+     * Here we check if it is the Android story.
+     * In that case we will have to call our USB code
+     */
+    if (!strncmp(rp->pathname,"ANDROID-USB",11)) {
+		rig_debug(RIG_DEBUG_VERBOSE, "ANDROID(in %s) will call USB init/open stuff with handle %d\n", __func__, rp->fd);
+		err = usb_init(rp);
+		if (err != RIG_OK) {
+			rig_debug(RIG_DEBUG_VERBOSE, "ANDROID(in %s) Could not init USB device\n", __func__);	
+			return -err;
+		}
+		
+		err = usb_open(rp);
+		if (err != RIG_OK)	{
+			rig_debug(RIG_DEBUG_VERBOSE, "ANDROID(in %s) Could not open USB device\n", __func__);
+			return -err;
+		}
+		
+		err = usb_setup(rp);
+		if (err != RIG_OK)	{
+			rig_debug(RIG_DEBUG_VERBOSE, "ANDROID(in %s) Could not setup USB device\n", __func__);
+			return -err;
+		}
+		
+		return RIG_OK;
+    }
+
     /*
      * Open in Non-blocking mode. Watch for EAGAIN errors!
      */
@@ -653,6 +682,11 @@ int ser_close(hamlib_port_t *p)
         return 0;
     }
 
+	if (!strncmp(p->pathname,"ANDROID-USB",11)) {
+		usb_close(p);
+		return 0;
+	}
+
     // Find backup termios options to restore before closing
     term_backup = term_options_backup_head;
     term_backup_prev = term_options_backup_head;
@@ -736,6 +770,10 @@ int HAMLIB_API ser_set_rts(hamlib_port_t *p, int state)
         return RIG_OK;
     }
 
+	if (!strncmp(p->pathname,"ANDROID-USB",11)) {
+		return usb_set_rts(p, state);
+	}
+	
 #if defined(TIOCMBIS) && defined(TIOCMBIC)
     rc = IOCTL(p->fd, state ? TIOCMBIS : TIOCMBIC, &y);
 #else
@@ -787,6 +825,10 @@ int HAMLIB_API ser_get_rts(hamlib_port_t *p, int *state)
         return -RIG_ENIMPL;
     }
 
+	if (!strncmp(p->pathname,"ANDROID-USB",11)) {
+		return usb_get_rts(p, state);
+	}
+	
     retcode = IOCTL(p->fd, TIOCMGET, &y);
     *state = (y & TIOCM_RTS) == TIOCM_RTS;
 
@@ -819,6 +861,10 @@ int HAMLIB_API ser_set_dtr(hamlib_port_t *p, int state)
         return RIG_OK;
     }
 
+	if (!strncmp(p->pathname,"ANDROID-USB",11)) {
+		return usb_set_dtr(p, state);
+	}
+	
 #if defined(TIOCMBIS) && defined(TIOCMBIC)
     rc = IOCTL(p->fd, state ? TIOCMBIS : TIOCMBIC, &y);
 #else

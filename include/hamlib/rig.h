@@ -1816,7 +1816,9 @@ struct rig {
 /* --------------- API function prototypes -----------------*/
 
 extern HAMLIB_EXPORT(RIG *) rig_init HAMLIB_PARAMS((rig_model_t rig_model));
+extern HAMLIB_EXPORT(RIG *) rig_init2 HAMLIB_PARAMS((rig_model_t rig_model, int android_usb_fd));
 extern HAMLIB_EXPORT(int) rig_open HAMLIB_PARAMS((RIG *rig));
+extern HAMLIB_EXPORT(int) rig_open2 HAMLIB_PARAMS((RIG *rig));
 
 /*
  *  General API commands, from most primitive to least.. :()

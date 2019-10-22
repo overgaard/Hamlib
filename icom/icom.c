@@ -454,6 +454,7 @@ int icom_init(RIG *rig)
 	const struct rig_caps *caps;
 
 	rig_debug(RIG_DEBUG_VERBOSE, "%s called\n", __func__);
+	rig_debug(RIG_DEBUG_VERBOSE, "ANDROID(in %s): rig_pathname: [%s] fd: %d\n", __func__, rig->state.rigport.pathname, rig->state.rigport.fd);
 	if (!rig || !rig->caps)
 		return -RIG_EINVAL;
 
